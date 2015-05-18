@@ -1,0 +1,86 @@
+/*
+
+Copyright (c) 2012-2014 RedBearLab
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+*/
+/*
+LowPowerTest.ino
+This example is used to demonstrate power saving. Atmega32u4 senses BLE events
+by interrupt and goes sleep when BLE is idle. More about this example please 
+refer to our wiki.
+*/
+
+#include <SPI.h>
+#include <boards.h>
+#include <RBL_nRF8001.h>
+
+int LED = 13;
+int Button = 1;
+
+void setup()
+{  
+  pinMode(LED, OUTPUT);
+  
+  pinMode(Button, INPUT);
+  digitalWrite(Button, HIGH);
+  attachInterrupt(3, BtnDownCB, FALLING );
+  
+  // Call the function to enable low power consumption
+  ble_low_power();
+  
+  // If you are using the Blend, uncomment below
+  //ble_set_pins(6, 7);
+  
+  // Init. and start BLE library.
+  ble_begin();
+}
+
+void loop()
+{
+  if (ble_available() )
+  {
+    uint8_t temp;
+    while ( ble_available() )
+    {
+      temp = ble_read();
+      if('o' == temp)
+      {
+        temp = ble_read();
+        if('n' == temp)
+        {
+          digitalWrite(13, HIGH);
+          ble_write_bytes((unsigned char *)"LED on", 6);
+        }
+        else if('f' == temp && 'f' == ble_read())
+        {
+          digitalWrite(13, LOW);
+          ble_write_bytes((unsigned char *)"LED off", 7);
+        }
+      }
+    }
+  }
+ 
+   ble_do_events();  
+}
+
+void BtnDownCB()
+{   
+    PRR0 = 0x00;  // Power Reduction Register: open timer
+    PRR1 = 0x00;
+    
+    delay(100);  //jitters elimination
+    if(LOW == digitalRead(1))
+    {
+      if ( ble_connected() )
+      {
+        ble_write_bytes((unsigned char *)"Button down", 11);
+      }
+    }
+}
+
