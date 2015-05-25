@@ -14,7 +14,7 @@
 
 static const hal_aci_data_t setup_msgs[NB_SETUP_MESSAGES] PROGMEM = SETUP_MESSAGES_CONTENT;
 
-
+#define PILL_COUNT_LENGTH 1
 
 // aci_struct that will contain
 // total initial credits
@@ -249,7 +249,7 @@ unsigned char is_ble_connected(){
 
 //Process all ACI events here
 //Process all ACI events here
-void ble_process_events()
+void ble_process_events(struct Prescription *prescription1, struct Prescription *prescription2, struct Prescription *prescription3, struct Prescription *prescription4 )
 {
   static bool setup_required = false;
 
@@ -259,8 +259,11 @@ void ble_process_events()
     aci_evt_t * aci_evt;
     aci_evt = &aci_data.evt;
 
+	if(debugMode){
 	Serial.print(F("Event OpCode = "));
 	Serial.println(aci_evt->evt_opcode, HEX);
+	}
+	
 	
     switch(aci_evt->evt_opcode)
     {
@@ -358,6 +361,7 @@ void ble_process_events()
         /*
         reset the credit available when the link gets connected
         */
+		is_connected = 1;
         aci_state.data_credit_available = aci_state.data_credit_total;
         Serial.println(F("Evt Connected"));
         /*
@@ -425,6 +429,7 @@ void ble_process_events()
         /**
         Advertise again if the advertising timed out.
         */
+		is_connected = 0;
         if(ACI_STATUS_ERROR_ADVT_TIMEOUT == aci_evt->params.disconnected.aci_status)
         {
           Serial.println(F("Evt Disconnected -> Advertising timed out"));
@@ -457,7 +462,6 @@ void ble_process_events()
                 Serial.println(F("Dynamic Data read and stored successfully"));
               }
             }
-
             //connect to an already bonded device
             //Use lib_aci_direct_connect for faster re-connections (advertising interval of 3.75 ms is used for directed advertising)
             lib_aci_connect(180/* in seconds */, 0x0020 /* advertising interval 20ms*/);
@@ -468,8 +472,97 @@ void ble_process_events()
 
       case ACI_EVT_DATA_RECEIVED:
         Serial.print(F("Pipe #: 0x"));
-        Serial.print(aci_evt->params.data_received.rx_data.pipe_number, HEX);
+        Serial.println(aci_evt->params.data_received.rx_data.pipe_number, HEX);
+		unsigned char invalidCompartment;
+        invalidCompartment = 0;		
+		Prescription* activePrescription;
         {
+		  switch(aci_evt->params.data_received.rx_data.aci_data[0])
+		  {
+			  case 0x01:
+					activePrescription = prescription1;
+					break;
+			  case 0x02:
+					activePrescription = prescription2;
+					break;
+			  case 0x03:
+					activePrescription = prescription3;
+					break;
+			  case 0x04:
+					activePrescription = prescription4;
+					break;				
+			default:
+				   invalidCompartment = 1;
+				   Serial.print(F("Error: Unsupported Compartment Byte"));
+				   break;
+		  }
+		  if(invalidCompartment != 1){
+			  switch(aci_evt->params.data_received.rx_data.pipe_number)
+		  {
+			  case PIPE_USER_DATA_SERVICE_PILL_COUNT_RX:
+					//Serial.println("Pill Count Pipe");
+					activePrescription->Pill_Count.newData = 1;
+					activePrescription->Pill_Count.dataValue = aci_evt->params.data_received.rx_data.aci_data[1];
+					break;
+			  case PIPE_USER_DATA_SERVICE_PILL_DOSAGE_RX:
+					//Serial.println("Pill Count Pipe");
+					activePrescription->Pill_Dosage.newData = 1;
+					activePrescription->Pill_Dosage.dataValue = aci_evt->params.data_received.rx_data.aci_data[1];
+					break;
+			  case PIPE_USER_DATA_SERVICE_PILL_TIME_RX:
+					Serial.println("Pill Count Pipe");
+					activePrescription->Pill_Time.data.newData = 1;
+					activePrescription->Pill_Time.alarmNumber = aci_evt->params.data_received.rx_data.aci_data[1];
+					long testVariable;
+					testVariable = 0;
+/* 					Serial.print(F("Test Variable Value BEFORE = "));
+					Serial.println(testVariable);
+					Serial.print("ACI EVT LENGTH = ");
+					Serial.println(aci_evt->len); */
+					for (int i = 2; i<aci_evt->len - 2; i++)
+					{
+						/* Serial.print("ACI Value for ");
+						Serial.print(i);
+						Serial.print(" = "); */
+					//	Serial.println(aci_evt->params.data_received.rx_data.aci_data[i], HEX);
+						testVariable |= aci_evt->params.data_received.rx_data.aci_data[i];
+/* 						Serial.print("Test Variable Value Before Shift for ");
+						Serial.print(i);
+						Serial.print(" = ");
+					    Serial.println(testVariable, HEX); */
+						if(i != aci_evt->len - 3)
+						{
+							testVariable = testVariable<<8;
+						/*     Serial.print("Test Variable Value AFTER Shift for ");
+						Serial.print(i);
+						Serial.print(" = ");
+					    Serial.println(testVariable, HEX); */
+						}
+					}
+					/* Serial.print(F("Test Variable Value = "));
+					Serial.println(testVariable); */
+					activePrescription->Pill_Time.data.dataValue = testVariable;
+					break;
+			 case PIPE_USER_DATA_SERVICE_PILL_NAME_RX:
+				   for(int i = 1; i<aci_evt->len - 2; i++)
+				   {
+					 /*   Serial.print(F("Active Prescription slot "));
+					   Serial.print(i);
+					   Serial.print(F(" has "));
+					   Serial.print(activePrescription->Pill_Name[i]);
+					   Serial.print(F(" but it should now have "));
+					   Serial.println(aci_evt->params.data_received.rx_data.aci_data[i]); */
+					   activePrescription->Pill_Name.pname[i-1] = (char)aci_evt->params.data_received.rx_data.aci_data[i];
+				   }
+			
+				   activePrescription->Pill_Name.pname[aci_evt->len - 2] = '\0';
+				   activePrescription->Pill_Name.newData = 1;
+				   
+				   break;
+		  }
+			  
+		  }
+		  
           int i;
           Serial.print(F(" Data(Hex) : "));
           for(i=0; i<aci_evt->len - 2; i++)
@@ -529,8 +622,7 @@ void ble_process_events()
           Serial.println(F("Already bonded : Advertising started : Waiting to be connected"));
         }
         break;
-	Serial.print(F("Event OpCode = "));
-	Serial.println(aci_evt->evt_opcode, HEX);
+
     }
 
 	}
@@ -655,11 +747,25 @@ bool ble_write(unsigned char data, uint8_t PIPE_NUMBER)
 
 }
 
+ 
+unsigned char ble_isDataAvailable(struct Prescription *prescription){
+	
+	if(prescription->Pill_Name.newData|prescription->Pill_Count.newData|prescription->Pill_Dosage.newData|prescription->Pill_Time.data.newData)
+	{
+		prescription->Pill_Name.newData = 0;
+		prescription->Pill_Count.newData = 0;
+		prescription->Pill_Dosage.newData = 0;
+		prescription->Pill_Time.data.newData = 0;
+		return 1;
+	}
+	else
+		return 0;
+	
+} 
+
 
 bool bleCanSleep(){
-
-	Serial.print(F("BLE Can Sleep Output = "));
-	Serial.println(gotCMDRSP||gotData);
+	//Serial.println(gotCMDRSP||gotData);
 	if(gotCMDRSP||gotData)
 	{
 		return true;
